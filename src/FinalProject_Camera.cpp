@@ -105,7 +105,6 @@ int main(int argc, const char *argv[])
 
         cout << "#2 : DETECT & CLASSIFY OBJECTS done" << endl;
 
-
         /* CROP LIDAR POINTS */
 
         // load 3D Lidar points from file
@@ -140,7 +139,7 @@ int main(int argc, const char *argv[])
         
         
         // REMOVE THIS LINE BEFORE PROCEEDING WITH THE FINAL PROJECT
-        continue; // skips directly to the next image without processing what comes beneath
+        //continue; // skips directly to the next image without processing what comes beneath
 
         /* DETECT IMAGE KEYPOINTS */
 
@@ -150,15 +149,19 @@ int main(int argc, const char *argv[])
 
         // extract 2D keypoints from current image
         vector<cv::KeyPoint> keypoints; // create empty feature list for current image
-        string detectorType = "SHITOMASI";
+        string detectorType = "FAST";
 
         if (detectorType.compare("SHITOMASI") == 0)
         {
             detKeypointsShiTomasi(keypoints, imgGray, false);
         }
+        else if (detectorType.compare("HARRIS") == 0)
+        {
+            detKeypointsHarris(keypoints, imgGray, false);
+        }
         else
         {
-            //...
+            detKeypointsModern(keypoints, imgGray, detectorType, false);
         }
 
         // optional : limit number of keypoints (helpful for debugging and learning)
@@ -167,7 +170,7 @@ int main(int argc, const char *argv[])
         {
             int maxKeypoints = 50;
 
-            if (detectorType.compare("SHITOMASI") == 0)
+            if (detectorType.compare("FAST") == 0)
             { // there is no response info, so keep the first 50 as they are sorted in descending quality order
                 keypoints.erase(keypoints.begin() + maxKeypoints, keypoints.end());
             }
@@ -184,7 +187,7 @@ int main(int argc, const char *argv[])
         /* EXTRACT KEYPOINT DESCRIPTORS */
 
         cv::Mat descriptors;
-        string descriptorType = "BRISK"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
+        string descriptorType = "ORB"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
         descKeypoints((dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->cameraImg, descriptors, descriptorType);
 
         // push descriptors for current frame to end of data buffer
@@ -209,6 +212,7 @@ int main(int argc, const char *argv[])
 
             // store matches in current data frame
             (dataBuffer.end() - 1)->kptMatches = matches;
+            cout<<"Matches Count = "<<matches.size()<<endl;
 
             cout << "#7 : MATCH KEYPOINT DESCRIPTORS done" << endl;
 
@@ -249,8 +253,9 @@ int main(int argc, const char *argv[])
                         prevBB = &(*it2);
                     }
                 }
-
                 // compute TTC for current match
+                // cout<<"Current bounding box {"<<currBB->boxID<<"} lidar points = "<<currBB->lidarPoints.size()<<endl;
+                // cout<<"Previous bounding {"<< prevBB->boxID<<"} lidar points = "<<prevBB->lidarPoints.size()<<endl;
                 if( currBB->lidarPoints.size()>0 && prevBB->lidarPoints.size()>0 ) // only compute TTC if we have Lidar points
                 {
                     //// STUDENT ASSIGNMENT
@@ -268,19 +273,88 @@ int main(int argc, const char *argv[])
                     //// EOF STUDENT ASSIGNMENT
 
                     bVis = true;
+                    // if (bVis)
+                    // {
+                    //     cv::Mat visImg = (dataBuffer.end() - 1)->cameraImg.clone();
+                    //     showLidarImgOverlay(visImg, currBB->lidarPoints, P_rect_00, R_rect_00, RT, &visImg);
+                    //     cv::rectangle(visImg, cv::Point(currBB->roi.x, currBB->roi.y), cv::Point(currBB->roi.x + currBB->roi.width, currBB->roi.y + currBB->roi.height), cv::Scalar(0, 255, 0), 2);
+                        
+                    //     char str[200];
+                    //     sprintf(str, "TTC Lidar : %f s, TTC Camera : %f s", ttcLidar, ttcCamera);
+                    //     putText(visImg, str, cv::Point2f(80, 50), cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(0,0,255));
+
+                    //     string windowName = "Final Results : TTC";
+                    //     cv::namedWindow(windowName, 4);
+                    //     cv::imshow(windowName, visImg);
+                    //     cout << "Press key to continue to next frame" << endl;
+                    //     cv::waitKey(0);
+                    // }
                     if (bVis)
-                    {
+                     {
                         cv::Mat visImg = (dataBuffer.end() - 1)->cameraImg.clone();
                         showLidarImgOverlay(visImg, currBB->lidarPoints, P_rect_00, R_rect_00, RT, &visImg);
-                        cv::rectangle(visImg, cv::Point(currBB->roi.x, currBB->roi.y), cv::Point(currBB->roi.x + currBB->roi.width, currBB->roi.y + currBB->roi.height), cv::Scalar(0, 255, 0), 2);
-                        
-                        char str[200];
-                        sprintf(str, "TTC Lidar : %f s, TTC Camera : %f s", ttcLidar, ttcCamera);
-                        putText(visImg, str, cv::Point2f(80, 50), cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(0,0,255));
+                        cv::rectangle(visImg,
+                               cv::Point(currBB->roi.x, currBB->roi.y),
+                               cv::Point(currBB->roi.x + currBB->roi.width, currBB->roi.y + currBB->roi.height), 
+                               cv::Scalar(0, 255, 0), 2);
 
-                        string windowName = "Final Results : TTC";
-                        cv::namedWindow(windowName, 4);
-                        cv::imshow(windowName, visImg);
+                         char str[200];
+                        sprintf(str, "TTC Lidar : %f s, TTC Camera : %f s", ttcLidar, ttcCamera);
+                         putText(visImg, str, cv::Point2f(80, 50), cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(0, 0, 255));
+
+                         auto currImg = (dataBuffer.end() - 1)->cameraImg.clone();
+                         auto prevImg = (dataBuffer.end() - 2)->cameraImg.clone();
+                          auto kptsPrev = (dataBuffer.end() - 2)->keypoints;
+                        auto kptsCurr = (dataBuffer.end() - 1)->keypoints;
+                        auto kptMatches = currBB->kptMatches;
+
+                        cv::Mat kpts_img;
+
+                        cv::drawMatches(prevImg, kptsPrev, currImg, kptsCurr, kptMatches, kpts_img,
+                            cv::Scalar::all(-1), cv::Scalar::all(-1), {},
+                            cv::DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+
+
+                        int match_id = 0;
+                        auto currFrame = *(dataBuffer.end() - 1);
+                        auto prevFrame = *(dataBuffer.end() - 2);
+                        auto curr_img = prevFrame.cameraImg.clone();
+
+                        for (auto &bmatch:bbBestMatches)
+                        {
+                           std::string label = std::to_string(match_id);
+                          // Draw rectangle displaying the bounding box
+                          int top, left, width, height;
+                          top = currFrame.boundingBoxes[bmatch.second].roi.y;
+                          left = currFrame.boundingBoxes[bmatch.second].roi.x;
+                          width = currFrame.boundingBoxes[bmatch.second].roi.width;
+                          height = currFrame.boundingBoxes[bmatch.second].roi.height;
+                          cv::rectangle(curr_img, cv::Point(left, top), cv::Point(left + width, top + height), cv::Scalar(0, 255, 0), 1);
+                          cv::putText(curr_img, label, cv::Point(left, top), cv::FONT_ITALIC, 0.75, cv::Scalar(0, 255, 0), 1);
+
+                          top = prevFrame.boundingBoxes[bmatch.first].roi.y;
+                          width = prevFrame.boundingBoxes[bmatch.first].roi.width;
+                          left = prevFrame.boundingBoxes[bmatch.first].roi.x;
+                          height = prevFrame.boundingBoxes[bmatch.first].roi.height;
+
+                          cv::rectangle(curr_img, cv::Point(left, top), cv::Point(left + width, top + height), cv::Scalar(0, 0, 255), 1);
+                          cv::putText(curr_img, label, cv::Point(left, top), cv::FONT_ITALIC, 0.75, cv::Scalar(0, 0, 255), 1);
+
+                           ++match_id;
+                        }
+
+                        cv::Mat canvas = cv::Mat::zeros(visImg.size()*2, visImg.type());
+
+                         kpts_img.copyTo(canvas(cv::Rect(0, 0, kpts_img.cols,  kpts_img.rows)));
+                         visImg.copyTo(canvas(cv::Rect(0, visImg.rows, visImg.cols, visImg.rows)));
+                        curr_img.copyTo(canvas(cv::Rect(visImg.cols, visImg.rows, visImg.cols, visImg.rows)));
+
+
+                        std::string windowName = "Final Results : TTC";
+                        cv::namedWindow(windowName, cv::WINDOW_AUTOSIZE);
+                        cv::resizeWindow(windowName, canvas.rows*0.1, canvas.cols*0.1);
+                        cv::imshow(windowName, canvas);
+
                         cout << "Press key to continue to next frame" << endl;
                         cv::waitKey(0);
                     }
@@ -292,6 +366,5 @@ int main(int argc, const char *argv[])
         }
 
     } // eof loop over all images
-
     return 0;
 }

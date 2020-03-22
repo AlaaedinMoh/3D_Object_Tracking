@@ -2,14 +2,23 @@
 #include <iostream>
 #include <algorithm>
 #include <numeric>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <set>
+#include <iterator>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <limits> 
 
 #include "camFusion.hpp"
 #include "dataStructures.h"
 
 using namespace std;
 
+void FilterOutliers(vector<LidarPoint>& lidarPoints, double tolerance);
+vector<vector<LidarPoint>> ClusterLidarPoints(const vector<LidarPoint>& lidarPoints, KdTree* tree, double tolerance);
+void ClusteringHelper (int idx, const vector<LidarPoint>& points, vector<LidarPoint>& resultCluster, KdTree* tree, vector<bool>& processed, double distTol);
 
 // Create groups of Lidar points whose projection into the camera falls into the same bounding box
 void clusterLidarWithROI(std::vector<BoundingBox> &boundingBoxes, std::vector<LidarPoint> &lidarPoints, float shrinkFactor, cv::Mat &P_rect_xx, cv::Mat &R_rect_xx, cv::Mat &RT)
@@ -120,12 +129,14 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 
     // display image
     string windowName = "3D Objects";
-    cv::namedWindow(windowName, 1);
+    cv::namedWindow(windowName, cv::WINDOW_GUI_NORMAL);
+    cv::resizeWindow(windowName, topviewImg.rows*0.4, topviewImg.cols*0.4);
     cv::imshow(windowName, topviewImg);
 
     if(bWait)
     {
         cv::waitKey(0); // wait for key to be pressed
+        // cv::imwrite("../Results/Images/Top_View_Img.png", topviewImg);
     }
 }
 
@@ -133,7 +144,32 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 // associate a given bounding box with the keypoints it contains
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
 {
-    // ...
+    double eDist = 0, sum = 0;
+    //calculate the mean distance of all matches
+    for(auto itr = kptMatches.begin(); itr != kptMatches.end(); itr++)
+    {
+        sum += itr->distance; 
+    }
+    eDist = sum/kptMatches.size();
+    // std::cout<<"Mean Distance = "<< eDist<<endl;
+    //associate the bounding box with keypoints matches
+    double widthScaleFactor = 0.8;
+    double heightScaleFactor = 0.8;
+    double scaledWidth = boundingBox.roi.width*widthScaleFactor;
+    double scaledHeight = boundingBox.roi.height*heightScaleFactor;
+    cv::Rect scaledRoi = cv::Rect(boundingBox.roi.x + (boundingBox.roi.width - scaledWidth) / 2, boundingBox.roi.y + (boundingBox.roi.height - scaledHeight) / 2, scaledWidth, scaledHeight);
+    boundingBox.roi = scaledRoi;
+    for(auto itr = kptMatches.begin(); itr != kptMatches.end(); itr++)
+    {
+        cv::KeyPoint prevKp = kptsPrev[itr->queryIdx];
+        cv::KeyPoint currKp = kptsCurr[itr->trainIdx];
+        if(std::fabs(itr->distance - eDist) < 15 && scaledRoi.contains(prevKp.pt) && scaledRoi.contains(currKp.pt))
+        {
+            boundingBox.kptMatches.push_back(*itr);
+        }
+    }
+    // std::cout<<"Total matches count = "<<kptMatches.size()<<endl;
+    // std::cout<<"BB matches count = "<<boundingBox.kptMatches.size()<<endl;
 }
 
 
@@ -141,18 +177,224 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
 void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, 
                       std::vector<cv::DMatch> kptMatches, double frameRate, double &TTC, cv::Mat *visImg)
 {
-    // ...
+    cv::Point2f secondPntPrev, secondPntCurr;
+    vector<double> relDistances;
+    double minDist = 50;
+    auto refPntCurr = kptsCurr[kptMatches.begin()->trainIdx].pt;
+    auto refPntPrev = kptsPrev[kptMatches.begin()->queryIdx].pt;
+    // std::for_each(kptMatches.begin() + 1, kptMatches.end(), [&] (cv::DMatch firstItr)
+    // {
+    //     firstPntPrev = kptsPrev[firstItr.queryIdx].pt;
+    //     firstPntCurr = kptsCurr[firstItr.trainIdx].pt;
+    //     // secondPntPrev = kptsPrev[matchItr.queryIdx].pt;
+    //     // secondPntCurr = kptsCurr[matchItr.trainIdx].pt;
+    //     // std::cout<<"Prev X = "<<secondPntPrev.x<<"\tY = "<<secondPntPrev.y<<endl;
+    //     // std::cout<<"Curr X = "<<secondPntCurr.x<<"\tY = "<<secondPntCurr.y<<endl;
+    //     // double previousDist = cv::norm(secondPntPrev - firstPntPrev);
+    //     // double currentDist = cv::norm(secondPntCurr - firstPntCurr);
+    //     // std::cout<<"Prev Dist = "<<previousDist<<"\t, Curr Dist = "<<currentDist<<endl;
+    //     // if(previousDist >= minDist && currentDist >= minDist && fabs(previousDist - currentDist) > 0.001)
+    //     // {
+    //     //     // cout<<"Prev Dist = "<<previousDist<<"\t, Curr Dist = "<<currentDist<<endl;
+    //     //     double distRatio = currentDist / previousDist;
+    //     //     relDistances.push_back(distRatio);
+    //     // }
+    //     std::for_each(kptMatches.begin(), kptMatches.end(), [&] (cv::DMatch secondItr)
+    //     {
+    //         if(firstItr.queryIdx != secondItr.queryIdx)
+    //         {
+    //             secondPntPrev = kptsPrev[secondItr.queryIdx].pt;
+    //             secondPntCurr = kptsCurr[secondItr.trainIdx].pt;
+    //             double previousDist = cv::norm(firstPntPrev - secondPntPrev);
+    //             double currentDist = cv::norm(firstPntCurr - secondPntCurr);
+    //             if(previousDist >= minDist && fabs(previousDist - currentDist) > 0.001)
+    //             {
+    //                 // cout<<"Prev Dist = "<<previousDist<<"\t, Curr Dist = "<<currentDist<<endl;
+    //                 double distRatio = currentDist / previousDist;
+    //                 relDistances.push_back(distRatio);
+    //             }
+    //         }
+    //     });
+    // });
+    std::for_each(kptMatches.begin() + 1, kptMatches.end(), [&] (cv::DMatch matchItr)
+    {
+        secondPntPrev = kptsPrev[matchItr.queryIdx].pt;
+        secondPntCurr = kptsCurr[matchItr.trainIdx].pt;
+        // std::cout<<"Prev X = "<<secondPntPrev.x<<"\tY = "<<secondPntPrev.y<<endl;
+        // std::cout<<"Curr X = "<<secondPntCurr.x<<"\tY = "<<secondPntCurr.y<<endl;
+        double previousDist = cv::norm(secondPntPrev - refPntPrev);
+        double currentDist = cv::norm(secondPntCurr - refPntCurr);
+        // std::cout<<"Prev Dist = "<<previousDist<<"\t, Curr Dist = "<<currentDist<<endl;
+        if(previousDist >= minDist && fabs(previousDist - currentDist) > 0.001)
+        {
+            // cout<<"Prev Dist = "<<previousDist<<"\t, Curr Dist = "<<currentDist<<endl;
+            double distRatio = currentDist / previousDist;
+            relDistances.push_back(distRatio);
+        }
+    });
+    if(relDistances.size()==0)
+    {
+        TTC=0;
+        cout<<"TTC = 0"<<endl;
+        return;
+    }
+    std::sort(relDistances.begin(), relDistances.end());
+    double med = relDistances.size() % 2 == 0 ? relDistances[relDistances.size()/2] : relDistances[(relDistances.size() + 1)/2];
+    // cout<<"Relatives Size = "<<relDistances.size()<<endl;
+    // cout<<"Relatives Median = "<<med<<endl;
+    double dt = 1/frameRate;
+    TTC = -(dt / (1 - med));
+    cout<<"Median Camera TTC = "<<TTC<<endl;
+    // double sum=0;
+    // std::for_each(relDistances.begin(), relDistances.end(),[&] (double dist){
+    //     sum+=dist;
+    // } );
+    // double mean = sum/relDistances.size();
+    // // cout<<"Mean = "<<mean<<"\t,Sum = "<<sum<<endl;
+    // TTC = -dt/(1 - mean);
+    // std::cout<<"Mean Camera TTC = "<<TTC<<endl;
 }
 
 
 void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
                      std::vector<LidarPoint> &lidarPointsCurr, double frameRate, double &TTC)
 {
-    // ...
+    //using clustering to get the points without outliers
+    double clusterTol = 0.7;
+    FilterOutliers(lidarPointsPrev, clusterTol);
+    FilterOutliers(lidarPointsCurr, clusterTol);
+    //Just the lane in front of the car is important to calcuate ttc
+    double laneWidth = 4;//, xMinPrev = numeric_limits<double>::max(), xMinCurr = numeric_limits<double>::max();
+    double halfLaneWidth = laneWidth/2;
+
+    double avrPrev = 0, avrCurr = 0, sumPrev = 0, sumCurr = 0, prevCount = 0, currCount = 0;
+
+    std::for_each(lidarPointsPrev.begin(), lidarPointsPrev.end(),[&](LidarPoint prevPnt)
+    {
+        if(abs(prevPnt.y)<=halfLaneWidth)
+        {
+            // xMinPrev= xMinPrev < prevPnt.x ? xMinPrev : prevPnt.x;
+            sumPrev+=prevPnt.x;
+            prevCount++;
+        }
+    });
+    std::for_each(lidarPointsCurr.begin(), lidarPointsCurr.end(), [&](LidarPoint currPnt)
+    {
+        if(abs(currPnt.y)<=halfLaneWidth)
+        {
+            // xMinCurr = xMinCurr < currPnt.x ? xMinCurr : currPnt.x;
+            sumCurr+=currPnt.x;
+            currCount++;
+        }
+    });
+    //calculate the ttc using the average distane of the points to minimize calculating error
+    avrPrev = sumPrev/prevCount;
+    avrCurr = sumCurr/currCount;
+    TTC = avrCurr/(frameRate * (avrPrev - avrCurr));
+    cout<<"Lidar TTC = "<<TTC<<endl;
 }
 
+void FilterOutliers(vector<LidarPoint>& lidarPoints, double tolerance)
+{
+    KdTree* tree = new KdTree();
+    vector<LidarPoint> resultCluser;
+    for(int i = 0; i < lidarPoints.size(); i++)
+    {
+        tree->insert(lidarPoints[i], i);
+    }
+    vector<vector<LidarPoint>> foundClusters = ClusterLidarPoints(lidarPoints, tree, tolerance);
+    pair<int, int> clusterPair(0,0); //first = cluster index, second = cluster size
+    
+    for(int idx = 0; idx < foundClusters.size(); idx++)
+    {
+        if(foundClusters[idx].size()>clusterPair.second)
+        {
+            clusterPair.first=idx;
+            clusterPair.second=foundClusters[idx].size();
+        }
+    }
+    lidarPoints = foundClusters[clusterPair.first];
+}
+
+vector<vector<LidarPoint>> ClusterLidarPoints(const vector<LidarPoint>& lidarPoints, KdTree* tree, double tolerance)
+{
+    vector<vector<LidarPoint>> result;
+    vector<bool> processed (lidarPoints.size(), false);
+    for(int idx = 0; idx < lidarPoints.size(); idx++)
+    {
+        if(!processed[idx])
+        {
+            vector<LidarPoint> cluster;
+            ClusteringHelper(idx, lidarPoints, cluster, tree, processed, tolerance);
+            result.push_back(cluster);
+        }
+    }
+    return result;
+}
+
+void ClusteringHelper (int idx, const vector<LidarPoint>& points, vector<LidarPoint>& resultCluster, KdTree* tree, vector<bool>& processed, double distTol)
+{
+    processed[idx]=true;
+    resultCluster.push_back(points[idx]);
+    vector<int> resultIds = tree->search(points[idx], distTol);
+    for(const int id : resultIds)
+    {
+        if(!processed[id])
+            ClusteringHelper(id, points, resultCluster, tree, processed, distTol);
+    }
+}
 
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches, std::map<int, int> &bbBestMatches, DataFrame &prevFrame, DataFrame &currFrame)
 {
-    // ...
+    // cv::Mat showImg = (currFrame.cameraImg);
+    int prevBoxId = 0, currBoxId =0;
+    std::for_each(prevFrame.boundingBoxes.begin(), prevFrame.boundingBoxes.end(), [&](BoundingBox prevBb)
+    {
+        map<int, int> currBbMatches;   //this map stores the box ids that shares the same matched key points
+        //iterate through the bounding boxes in the current frame to find the mathced keypoints
+        std::for_each(currFrame.boundingBoxes.begin(), currFrame.boundingBoxes.end(), [&](BoundingBox currBb)
+        {
+            //iterate through the keypoints matches to define the key points in each bounding box
+            std::for_each(matches.begin(), matches.end(), [&] (cv::DMatch match)
+            {
+                cv::KeyPoint currKp = currFrame.keypoints[match.trainIdx];
+                if(currBb.roi.contains(currKp.pt))
+                {
+                    currBb.keypoints.push_back(currKp);
+                    cv::KeyPoint prevKp = prevFrame.keypoints[match.queryIdx];
+                    if(prevBb.roi.contains(prevKp.pt))
+                    {
+                        prevFrame.keypoints.push_back(prevKp);
+                        if(currBbMatches.count(currBb.boxID) > 0)
+                        {
+                            currBbMatches[currBb.boxID]+=1;
+                        }
+                        else
+                        {
+                            currBbMatches.insert(make_pair(currBb.boxID, 1));
+                        }
+                    }
+                }
+            });
+            
+        });
+        //Map the bounding box in the previous frame with the one in the current frame depending on the max existence of the key points
+        int currBbId = 0, maxCount = 0;
+            std::for_each(currBbMatches.begin(), currBbMatches.end(), [&](pair<int,int> matchPair)
+            {
+                if(matchPair.second>maxCount)
+                {
+                    currBbId=matchPair.first;
+                    maxCount=matchPair.second;
+                }
+            });
+        bbBestMatches.insert(make_pair(prevBb.boxID, currBbId));
+    });
+
+    // cout<<"Number of boxes in current frame = "<<currFrame.boundingBoxes.size()<<endl;
+    // cout<<"Showing the image"<<endl;
+    // string windowName = "current frame";
+    // cv::resize(showImg, showImg, cv::Size2d(showImg.cols * 2, showImg.rows * 2));
+    // // cv::resizeWindow(windowName, showImg.cols*2, showImg.rows*2);
+    // cv::imshow("current frame", currFrame.cameraImg);
 }
