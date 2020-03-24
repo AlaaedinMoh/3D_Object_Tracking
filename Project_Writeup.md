@@ -68,7 +68,6 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
     {
         if(abs(prevPnt.y)<=halfLaneWidth)
         {
-            // xMinPrev= xMinPrev < prevPnt.x ? xMinPrev : prevPnt.x;
             sumPrev+=prevPnt.x;
             prevCount++;
         }
@@ -77,7 +76,6 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
     {
         if(abs(currPnt.y)<=halfLaneWidth)
         {
-            // xMinCurr = xMinCurr < currPnt.x ? xMinCurr : currPnt.x;
             sumCurr+=currPnt.x;
             currCount++;
         }
@@ -146,36 +144,177 @@ void ClusteringHelper (int idx, const vector<LidarPoint>& points, vector<LidarPo
 
 ## 3- Associate Keypoint Correspondences with Bounding Boxes: 
 ### Prepare the TTC computation based on camera measurements by associating keypoint correspondences to the bounding boxes which enclose them. All matches which satisfy this condition must be added to a vector in the respective bounding box.
-The code shrink the ROI to avoid the addind key points matching from the road.
+The code shrink the ROI to avoid the addind key points matching from the road. Then it filters out the keypoints depending on the matche distance and the spatial distance between the previous and the current frames.
 ```C++
-void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
-{
-    double eDist = 0, sum = 0;
-    //calculate the mean distance of all matches
-    for(auto itr = kptMatches.begin(); itr != kptMatches.end(); itr++)
+void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches) {
+  //associate the bounding box with keypoints matches
+  double widthScaleFactor = 0.8;
+  double heightScaleFactor = 0.8;
+  double scaledWidth = boundingBox.roi.width * widthScaleFactor;
+  double scaledHeight = boundingBox.roi.height * heightScaleFactor;
+  cv::Rect scaledRoi = cv::Rect(boundingBox.roi.x + (boundingBox.roi.width - scaledWidth) / 2, boundingBox.roi.y + (boundingBox.roi.height - scaledHeight) / 2, scaledWidth, scaledHeight);
+  boundingBox.roi = scaledRoi;
+
+  for (auto & kptMatche : kptMatches) {
+    cv::KeyPoint prevKp = kptsPrev[kptMatche.queryIdx];
+    cv::KeyPoint currKp = kptsCurr[kptMatche.trainIdx];
+
+    if (scaledRoi.contains(prevKp.pt) && scaledRoi.contains(currKp.pt) )
     {
-        sum += itr->distance; 
+      boundingBox.kptMatches.push_back(kptMatche);
     }
-    eDist = sum/kptMatches.size();
-    double widthScaleFactor = 0.8;
-    double heightScaleFactor = 0.8;
-    double scaledWidth = boundingBox.roi.width*widthScaleFactor;
-    double scaledHeight = boundingBox.roi.height*heightScaleFactor;
-    cv::Rect scaledRoi = cv::Rect(boundingBox.roi.x + (boundingBox.roi.width - scaledWidth) / 2, boundingBox.roi.y + (boundingBox.roi.height - scaledHeight) / 2, scaledWidth, scaledHeight);
-    boundingBox.roi = scaledRoi;
-    for(auto itr = kptMatches.begin(); itr != kptMatches.end(); itr++)
-    {
-        cv::KeyPoint prevKp = kptsPrev[itr->queryIdx];
-        cv::KeyPoint currKp = kptsCurr[itr->trainIdx];
-        if(std::fabs(itr->distance - eDist) < 15 && scaledRoi.contains(prevKp.pt) && scaledRoi.contains(currKp.pt))
-        {
-            boundingBox.kptMatches.push_back(*itr);
-        }
-    }
+  }
 }
 ```
 
 ## 4- Compute Camera-based TTC: Compute the time-to-collision in second for all matched 3D objects using only keypoint correspondences from the matched bounding boxes between current and previous frame.
+Calculating the camera TTC is done by measuring the relative distances between the keypoints in the ROI.
+```C++
+void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr,
+                      std::vector<cv::DMatch> kptMatches, double frameRate, double &TTC, cv::Mat *visImg) {
+  vector<double> relDistances{};
+  double minDist = 100;
+
+    if(kptMatches.size() < 2)
+    {
+        cout<<"No matching points. Camera TTC = 0"<<endl;
+        TTC = NAN;
+        return;
+    }
+
+  std::for_each(kptMatches.begin() + 1, kptMatches.end(), [&](cv::DMatch firstItr) {
+    auto refPntPrev = kptsPrev[firstItr.queryIdx].pt;
+    auto refPntCurr = kptsCurr[firstItr.trainIdx].pt;
+
+    std::for_each(kptMatches.begin() + 1, kptMatches.end(), [&](cv::DMatch matchItr) {
+      auto secondPntPrev = kptsPrev[matchItr.queryIdx].pt;
+      auto secondPntCurr = kptsCurr[matchItr.trainIdx].pt;
+
+      double previousDist = cv::norm(secondPntPrev - refPntPrev);
+      double currentDist = cv::norm(secondPntCurr - refPntCurr);
+
+      if (previousDist > minDist && std::abs(previousDist - currentDist) > 0.001) {
+        double distRatio = currentDist / previousDist;
+        relDistances.push_back(distRatio);
+      }
+    });
+  });
+  if (relDistances.empty()) {
+    TTC = NAN;
+    return;
+  }
+  std::sort(relDistances.begin(), relDistances.end());
+  double med = relDistances.size() % 2 == 0 ? relDistances[relDistances.size() / 2] : relDistances[(relDistances.size() + 1) / 2];
+  double dt = 1 / frameRate;
+  TTC = -dt / (1 - med);
+  cout << "Median Camera TTC = " << TTC << endl;
+}
+```
+## Preformance Evaluation:
+To evaluate the performance I created a class that can save the results in CSV-file.
+
+## Evaluating Performance:
+To evaluate the performance I created a new class that write CSV files and save the performance data in the file. I choosed to save the number of the total detected key points and the elapsed detecting time in one file. The TTC of lidar and the camera and the difference between them are saved in another file.
+```C++
+class CSV_Writer
+{
+private:
+    //Column name - column value type
+    map<int, string, std::less<int>> _csvCols;
+    vector<CSV_Line> _contents;
+    string _separator;
+    void AddContentsToStream(map<int, string> lineContents, fstream& currentStream);
+public:
+    CSV_Writer(map<int, string> colsNames, string separator);
+    ~CSV_Writer();
+    void AddLine(const CSV_Line& line);
+    bool SaveFile(string filePath);
+};
+
+CSV_Writer::CSV_Writer(map<int, string> cols, string separator = ",")
+{
+    _separator = separator;
+    for(const auto& col : cols)
+    {
+        _csvCols.insert(col);
+    }
+
+}
+
+CSV_Writer::~CSV_Writer()
+{
+}
+
+void CSV_Writer::AddLine(const CSV_Line& line)
+{
+    _contents.push_back(line);
+}
+
+bool CSV_Writer::SaveFile(string filePath)
+{
+    try
+    {
+        bool existed = false;
+        ifstream file(filePath);
+        if(file)
+        {
+            existed = true;
+            file.close();
+        }
+        fstream fileStream (filePath, std::ios_base::app | std::ios_base::out);
+        string lineTxt = "";
+        if(existed)
+        {
+            for(const CSV_Line& line : _contents)
+            {
+                AddContentsToStream(line.lineMap, fileStream);
+            }
+        }
+        else
+        {
+            for(const auto& col : _csvCols)
+            {
+                lineTxt += col.second + _separator;
+            }
+            lineTxt+="\n";
+            fileStream<<lineTxt;
+            for(const CSV_Line& line : _contents)
+            {
+                AddContentsToStream(line.lineMap, fileStream);
+            }
+        }
+        lineTxt = "";
+        for(const auto& col : _csvCols)
+        {
+            lineTxt += " " + _separator;
+        }
+        lineTxt+="\n";
+        fileStream<<lineTxt;
+        fileStream.close();
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << '\n';
+        return false;
+    }
+}
+
+void CSV_Writer::AddContentsToStream(map<int, string> lineContents, fstream& currentStream)
+{
+    map<int, string, std::less<int>> orderedMap;
+    for(const auto& line : lineContents)
+    {
+        orderedMap.insert(make_pair(line.first, line.second));
+    }
+    string lineTxt = "";
+    for(const auto& entry : orderedMap)
+    {
+        lineTxt += entry.second + _separator;
+    }
+    lineTxt += "\n";
+    currentStream<<lineTxt;
+}
+```
 
 ## 5- Performance Evaluation 1: Find examples where the TTC estimate of the Lidar sensor does not seem plausible. Describe your observations and provide a sound argumentation why you think this happened.
 ### Several examples (2-3) have been identified and described in detail. The assertion that the TTC is off has been based on manually estimating the distance to the rear of the preceding vehicle from a top view perspective of the Lidar points.

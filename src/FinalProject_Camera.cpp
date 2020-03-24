@@ -19,12 +19,53 @@
 #include "objectDetection2D.hpp"
 #include "lidarData.hpp"
 #include "camFusion.hpp"
+#include "CSV_Writer.cpp"
 
 using namespace std;
+
+void CheckOrUpdateWorstScenarien(double lidarDist, double cameraDist);
 
 /* MAIN PROGRAM */
 int main(int argc, const char *argv[])
 {
+    bool writeFiles = true;
+    string detectorType = "SHITOMASI";       // SHITOMASI, HARRIS, FAST, BRISK, ORB, AKAZE, SIFT
+    string descriptorType = "BRISK";     // // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
+    string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
+    string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN 
+    if(argc>=2)
+    {
+        detectorType=argv[1];
+        if(argc>=3)
+        {
+            descriptorType = argv[2];
+            if(argc>=4)
+            {
+                matcherType = argv[3];
+                if(argc>=5)
+                {
+                    selectorType = argv[4];
+                }
+            }
+        }
+    }
+
+    std::map<int, string> det_desc_map;
+    det_desc_map.insert(std::make_pair(1,"Detector - Descriptor"));
+    det_desc_map.insert(std::make_pair(2,"Frame"));
+    det_desc_map.insert(std::make_pair(3,"Numner of keypoints"));
+    det_desc_map.insert(std::make_pair(4,"Total elapsed time"));
+    CSV_Writer detDescWriter(det_desc_map);
+    std::map<int, string> ttc_diff_map;
+    ttc_diff_map.insert(make_pair(1, "detector - descriptor"));
+    ttc_diff_map.insert(make_pair(2, "Frame"));
+    ttc_diff_map.insert(make_pair(3, "lidar TTC"));
+    ttc_diff_map.insert(make_pair(4, "Camera TTC"));
+    ttc_diff_map.insert(make_pair(5, "Difference"));
+    CSV_Writer ttcDifWriter(ttc_diff_map);
+    // ttcDifWriter.SaveFile("../Results/testSave.csv");
+
+
     /* INIT VARIABLES AND DATA STRUCTURES */
 
     // data location
@@ -95,7 +136,7 @@ int main(int argc, const char *argv[])
 
         cout << "#1 : LOAD IMAGE INTO BUFFER done" << endl;
 
-
+        
         /* DETECT & CLASSIFY OBJECTS */
 
         float confThreshold = 0.2;
@@ -149,19 +190,20 @@ int main(int argc, const char *argv[])
 
         // extract 2D keypoints from current image
         vector<cv::KeyPoint> keypoints; // create empty feature list for current image
-        string detectorType = "FAST";
+        
+        double elapsTime = 0;
 
         if (detectorType.compare("SHITOMASI") == 0)
         {
-            detKeypointsShiTomasi(keypoints, imgGray, false);
+            elapsTime += detKeypointsShiTomasi(keypoints, imgGray, false);
         }
         else if (detectorType.compare("HARRIS") == 0)
         {
-            detKeypointsHarris(keypoints, imgGray, false);
+            elapsTime += detKeypointsHarris(keypoints, imgGray, false);
         }
         else
         {
-            detKeypointsModern(keypoints, imgGray, detectorType, false);
+            elapsTime += detKeypointsModern(keypoints, imgGray, detectorType, false);
         }
 
         // optional : limit number of keypoints (helpful for debugging and learning)
@@ -187,14 +229,18 @@ int main(int argc, const char *argv[])
         /* EXTRACT KEYPOINT DESCRIPTORS */
 
         cv::Mat descriptors;
-        string descriptorType = "ORB"; // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
-        descKeypoints((dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->cameraImg, descriptors, descriptorType);
+        elapsTime += descKeypoints((dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->cameraImg, descriptors, descriptorType);
 
         // push descriptors for current frame to end of data buffer
         (dataBuffer.end() - 1)->descriptors = descriptors;
 
         cout << "#6 : EXTRACT DESCRIPTORS done" << endl;
-
+        CSV_Line kptCountLine;
+        kptCountLine.lineMap.insert(make_pair(1, detectorType + "-" + descriptorType));
+        kptCountLine.lineMap.insert(make_pair(2, "Frame " + to_string(imgIndex + 1)));
+        kptCountLine.lineMap.insert(make_pair(3, to_string(keypoints.size())));
+        kptCountLine.lineMap.insert(make_pair(4, to_string(elapsTime)));
+        detDescWriter.AddLine(kptCountLine);
 
         if (dataBuffer.size() > 1) // wait until at least two images have been processed
         {
@@ -202,9 +248,6 @@ int main(int argc, const char *argv[])
             /* MATCH KEYPOINT DESCRIPTORS */
 
             vector<cv::DMatch> matches;
-            string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
-            string descriptorType = "DES_BINARY"; // DES_BINARY, DES_HOG
-            string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN
 
             matchDescriptors((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints,
                              (dataBuffer.end() - 2)->descriptors, (dataBuffer.end() - 1)->descriptors,
@@ -271,7 +314,13 @@ int main(int argc, const char *argv[])
                     clusterKptMatchesWithROI(*currBB, (dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, (dataBuffer.end() - 1)->kptMatches);                    
                     computeTTCCamera((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints, currBB->kptMatches, sensorFrameRate, ttcCamera);
                     //// EOF STUDENT ASSIGNMENT
-
+                    CSV_Line diffLine;
+                    diffLine.lineMap.insert(make_pair(1, detectorType + "-" + descriptorType));
+                    diffLine.lineMap.insert(make_pair(2, "Frame" + to_string(imgIndex)));
+                    diffLine.lineMap.insert(make_pair(3, to_string(ttcLidar)));
+                    diffLine.lineMap.insert(make_pair(4, to_string(ttcCamera)));
+                    diffLine.lineMap.insert(make_pair(5, to_string(abs(ttcLidar - ttcCamera))));
+                    ttcDifWriter.AddLine(diffLine);
                     bVis = true;
                     // if (bVis)
                     // {
@@ -366,5 +415,10 @@ int main(int argc, const char *argv[])
         }
 
     } // eof loop over all images
+    if(writeFiles)
+    {
+        detDescWriter.SaveFile("../Results/Det_Desc_kpts_count_time.csv");
+        ttcDifWriter.SaveFile("../Results/TTC_Estimate_Diff.csv");
+    }
     return 0;
 }
