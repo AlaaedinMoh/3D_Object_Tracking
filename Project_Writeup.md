@@ -318,6 +318,18 @@ void CSV_Writer::AddContentsToStream(map<int, string> lineContents, fstream& cur
 
 ## 5- Performance Evaluation 1: Find examples where the TTC estimate of the Lidar sensor does not seem plausible. Describe your observations and provide a sound argumentation why you think this happened.
 ### Several examples (2-3) have been identified and described in detail. The assertion that the TTC is off has been based on manually estimating the distance to the rear of the preceding vehicle from a top view perspective of the Lidar points.
+|Scenario|Detector-Descriptor|Frame|TTC-Lidar|TTC-Camera|Differnce|
+|:-------|:-----------------:|:---:|:-------:|:--------:|:-------:|
+|1|ORB-BRISK|Frame1|12.2891|nan|nan|
+|2|SHITOMASI-BRIEF|Frame3|16.384452|8.729978|7.654474|
+After the observation of the results, we can come to the conclusion, that the TTC-Camera is not very reliable. Because it depends on the detector-descriptor types. Each one of them can give us different results, which could lead to inaccurate estimation. More than that, camera TTC depends on the estimating the distance between the pixels, but the lidar gives us the measuments of the distance directly. However, detecting keypoints depends on the surrounding environment. This means, that for example in the darkness, it is impossible to estimate the camera TTC because there is no light to detect the keypoints. Or in foggy weather the camera could not detect the other cars very well. The technical specifications of the camera itself could play a role detecting the keypoints also.
+
 
 ## 6- Performance Evaluation 2: Run several detector / descriptor combinations and look at the differences in TTC estimation. Find out which methods perform best and also include several examples where camera-based TTC estimation is way off. As with Lidar, describe your observations again and also look into potential reasons.
 ### All detector / descriptor combinations implemented in previous chapters have been compared with regard to the TTC estimate on a frame-by-frame basis. To facilitate comparison, a spreadsheet and graph should be used to represent the different TTCs.
+|Scenario|Detector-Descriptor|Frame|TTC-Lidar|TTC-Camera|Differnce|
+|:-------|:-----------------:|:---:|:-------:|:--------:|:-------:|
+|1|SHITOMASI-BRISK|Frame16|8.898673|8.574856|0.323817|
+|2|FAST-BRIEF|Frame15|8.3212|8.443254|0.122054|
+|3|BRISK-BRISK|	Frame6|	13.751074|	13.609277|	0.141797|
+In some scenarien there were very close estimations between the Lidar and the camera. The table above illustrate some samples of these results. Anyway the combination of BRISK detector and ORB descriptor has the largest number of close etimations(You can find it in the file estimation CSV file [here](./Results/TTC_Estimate_Diff.csv)).

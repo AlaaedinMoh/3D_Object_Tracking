@@ -28,27 +28,36 @@ void CheckOrUpdateWorstScenarien(double lidarDist, double cameraDist);
 /* MAIN PROGRAM */
 int main(int argc, const char *argv[])
 {
-    bool writeFiles = true;
+    bool writeFiles = false;
     string detectorType = "SHITOMASI";       // SHITOMASI, HARRIS, FAST, BRISK, ORB, AKAZE, SIFT
     string descriptorType = "BRISK";     // // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
     string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
     string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN 
     if(argc>=2)
     {
-        detectorType=argv[1];
+        writeFiles = string(argv[1]).compare("-o")==0;
         if(argc>=3)
         {
-            descriptorType = argv[2];
+            detectorType=argv[2];
             if(argc>=4)
             {
-                matcherType = argv[3];
+               descriptorType = argv[3];
                 if(argc>=5)
                 {
-                    selectorType = argv[4];
+                     matcherType = argv[4];
+                    if(argc>=6)
+                    {
+                        selectorType = argv[5];
+                    }
                 }
             }
         }
     }
+    else
+    {
+        cout<<"No CSV files will be written...\n";
+    }
+    
 
     std::map<int, string> det_desc_map;
     det_desc_map.insert(std::make_pair(1,"Detector - Descriptor"));
@@ -255,7 +264,6 @@ int main(int argc, const char *argv[])
 
             // store matches in current data frame
             (dataBuffer.end() - 1)->kptMatches = matches;
-            cout<<"Matches Count = "<<matches.size()<<endl;
 
             cout << "#7 : MATCH KEYPOINT DESCRIPTORS done" << endl;
 

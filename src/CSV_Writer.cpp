@@ -87,6 +87,7 @@ bool CSV_Writer::SaveFile(string filePath)
         lineTxt+="\n";
         fileStream<<lineTxt;
         fileStream.close();
+        return true;
     }
     catch(const std::exception& e)
     {
