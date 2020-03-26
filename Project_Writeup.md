@@ -161,7 +161,7 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
 
     if (scaledRoi.contains(prevKp.pt) && scaledRoi.contains(currKp.pt) )
     {
-      boundingBox.kptMatches.push_back(kptMatche);
+        boundingBox.kptMatches.push_back(kptMatche);
     }
   }
 }
@@ -173,7 +173,7 @@ Calculating the camera TTC is done by measuring the relative distances between t
 void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr,
                       std::vector<cv::DMatch> kptMatches, double frameRate, double &TTC, cv::Mat *visImg) {
   vector<double> relDistances{};
-  double minDist = 100;
+  double minDist = 80;
 
     if(kptMatches.size() < 2)
     {
@@ -187,16 +187,15 @@ void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPo
     auto refPntCurr = kptsCurr[firstItr.trainIdx].pt;
 
     std::for_each(kptMatches.begin() + 1, kptMatches.end(), [&](cv::DMatch matchItr) {
-      auto secondPntPrev = kptsPrev[matchItr.queryIdx].pt;
-      auto secondPntCurr = kptsCurr[matchItr.trainIdx].pt;
+        auto secondPntPrev = kptsPrev[matchItr.queryIdx].pt;
+        auto secondPntCurr = kptsCurr[matchItr.trainIdx].pt;
 
-      double previousDist = cv::norm(secondPntPrev - refPntPrev);
-      double currentDist = cv::norm(secondPntCurr - refPntCurr);
-
-      if (previousDist > minDist && std::abs(previousDist - currentDist) > 0.001) {
-        double distRatio = currentDist / previousDist;
-        relDistances.push_back(distRatio);
-      }
+        double previousDist = cv::norm(secondPntPrev - refPntPrev);
+        double currentDist = cv::norm(secondPntCurr - refPntCurr);
+        if (previousDist > minDist && currentDist > previousDist) {
+            double distRatio = currentDist / previousDist;
+            relDistances.push_back(distRatio);
+        }
     });
   });
   if (relDistances.empty()) {

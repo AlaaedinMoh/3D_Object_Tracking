@@ -154,7 +154,6 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
 
     if (scaledRoi.contains(prevKp.pt) && scaledRoi.contains(currKp.pt) )
     {
-        // cout<<"Match is added\n";
         boundingBox.kptMatches.push_back(kptMatche);
     }
   }
@@ -184,7 +183,6 @@ void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPo
 
         double previousDist = cv::norm(secondPntPrev - refPntPrev);
         double currentDist = cv::norm(secondPntCurr - refPntCurr);
-        // cout<<"Current dist = "<<currentDist<<"\t, prev dist = "<<previousDist<<endl;
         if (previousDist > minDist && currentDist > previousDist) {
             double distRatio = currentDist / previousDist;
             relDistances.push_back(distRatio);
