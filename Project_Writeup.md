@@ -322,6 +322,7 @@ void CSV_Writer::AddContentsToStream(map<int, string> lineContents, fstream& cur
 |:-------|:-----------------:|:---:|:-------:|:--------:|:-------:|
 |1|ORB-BRISK|Frame1|12.2891|nan|nan|
 |2|SHITOMASI-BRIEF|Frame3|16.384452|8.729978|7.654474|
+
 After the observation of the results, we can come to the conclusion, that the TTC-Camera is not very reliable. Because it depends on the detector-descriptor types. Each one of them can give us different results, which could lead to inaccurate estimation. More than that, camera TTC depends on the estimating the distance between the pixels, but the lidar gives us the measuments of the distance directly. However, detecting keypoints depends on the surrounding environment. This means, that for example in the darkness, it is impossible to estimate the camera TTC because there is no light to detect the keypoints. Or in foggy weather the camera could not detect the other cars very well. The technical specifications of the camera itself could play a role detecting the keypoints also.
 
 
@@ -332,4 +333,5 @@ After the observation of the results, we can come to the conclusion, that the TT
 |1|SHITOMASI-BRISK|Frame16|8.898673|8.574856|0.323817|
 |2|FAST-BRIEF|Frame15|8.3212|8.443254|0.122054|
 |3|BRISK-BRISK|	Frame6|	13.751074|	13.609277|	0.141797|
+
 In some scenarien there were very close estimations between the Lidar and the camera. The table above illustrate some samples of these results. Anyway the combination of BRISK detector and ORB descriptor has the largest number of close etimations(You can find it in the file estimation CSV file [here](./Results/TTC_Estimate_Diff.csv)).
